@@ -1,0 +1,77 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out Android app
+        uses: actions/checkout@v4
+
+      - name: Check out Go server
+        uses: actions/checkout@v4
+        with:
+          repository: littckerQiu/workdayAlarmClockGo
+          path: go-server
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache: true
+          cache-dependency-path: go-server/go.sum
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Cross-compile Go binaries for Android
+        working-directory: go-server
+        run: |
+          set -euo pipefail
+          mkdir -p ../app/libs/armeabi-v7a ../app/libs/arm64-v8a ../app/libs/x86
+
+          echo "Building arm (armeabi-v7a)..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-w -s" -o ../app/libs/armeabi-v7a/libWorkdayAlarmClock.so .
+
+          echo "Building arm64 (arm64-v8a)..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-w -s" -o ../app/libs/arm64-v8a/libWorkdayAlarmClock.so .
+
+          echo "Building x86..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -trimpath -ldflags="-w -s" -o ../app/libs/x86/libWorkdayAlarmClock.so .
+
+          ls -lh ../app/libs/*/libWorkdayAlarmClock.so
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleFullDebug assembleNolauncherDebug assembleX86Debug --no-daemon --stacktrace
+
+      - name: List built APKs
+        run: find . -name "*.apk" -type f -exec ls -lh {} \;
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: app/release/*.apk
+          retention-days: 30
+
+      - name: Upload debug APKs too
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-debug
+          path: app/build/outputs/apk/**/*.apk
+          retention-days: 30
